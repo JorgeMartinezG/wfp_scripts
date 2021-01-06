@@ -159,7 +159,7 @@ def main():
 
         market_db, geom_equal, name_equal = res
         update = False
-        if geom_equal is not False:
+        if geom_equal is False:
             history = MarketHistory(
                 action="UPDATED_GEOM",
                 market_id=market_db.id,
@@ -170,7 +170,7 @@ def main():
             market_db.geom = market.geom
             update = True
 
-        if name_equal is not False:
+        if name_equal is False:
             history = MarketHistory(
                 action="UPDATED_NAME",
                 market_id=market_db.id,
