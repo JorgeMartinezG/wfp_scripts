@@ -44,7 +44,7 @@ class Earthquake(Base):
 
     id = Column(String, primary_key=True)
     geom = Column(Geometry("POINT"))
-    mag = (Column(Float),)
+    mag = Column(Float)
     place = Column(String)
     time = Column(DateTime, nullable=False)
     url = Column(String)
