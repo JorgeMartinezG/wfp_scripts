@@ -124,7 +124,11 @@ def request_api(start_date, end_date):
     response_ids = [r.get("id") for r in data.get("features")]
 
     # Get all ids which are in the database already.
-    db_ids = session.query(Earthquake.id).filter(Earthquake.id.in_(response_ids)).all()
+    db_ids = (
+        session.query(Earthquake.id)
+        .filter(Earthquake.id.in_(response_ids))
+        .all()
+    )
     db_ids = [r.id for r in db_ids]
 
     objs = [to_obj(f, db_ids) for f in data.get("features")]
@@ -145,6 +149,12 @@ def fetch_all():
         start_date = end_date + timedelta(days=1)
 
 
+def fetch_most_recent():
+    logging.info("Fetching last two weeks report")
+    start_date = DATE_RUN - timedelta(days=15)
+    request_api(start_date, DATE_RUN)
+
+
 def main():
     parser = optparse.OptionParser()
     parser.add_option(
@@ -161,8 +171,10 @@ def main():
     # Create tables.
     Base.metadata.create_all(engine)
 
-    if options.weekly == False:
+    if options.weekly is False:
         fetch_all()
+    else:
+        fetch_most_recent()
 
 
 if __name__ == "__main__":
