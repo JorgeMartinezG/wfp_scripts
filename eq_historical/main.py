@@ -42,8 +42,8 @@ class Earthquake(Base):
     __tablename__ = "wld_eq_historical"
     __table_args__ = {"schema": DB_SCHEMA}
 
-    id = Column(String, primary_key=True)
-    geom = Column(Geometry("POINT"))
+    fid = Column(String, primary_key=True)
+    shape = Column(Geometry(geometry_type="POINT", srid=4326))
     mag = Column(Float)
     place = Column(String)
     time = Column(DateTime, nullable=False)
@@ -76,7 +76,7 @@ def to_obj(feature, db_ids):
         "sources",
     ]
 
-    item = {"id": obj_id}
+    item = {"fid": obj_id}
 
     # Parse parameters.
     for k, v in feature.get("properties").items():
@@ -95,7 +95,7 @@ def to_obj(feature, db_ids):
     feat_type = geom.get("type")
     coords = " ".join([str(c) for c in geom.get("coordinates")[:2]])
 
-    item["geom"] = f"{feat_type} ({coords})"
+    item["shape"] = f"SRID=4326;{feat_type} ({coords})"
 
     obj = Earthquake(**item)
 
@@ -125,11 +125,11 @@ def request_api(start_date, end_date):
 
     # Get all ids which are in the database already.
     db_ids = (
-        session.query(Earthquake.id)
-        .filter(Earthquake.id.in_(response_ids))
+        session.query(Earthquake.fid)
+        .filter(Earthquake.fid.in_(response_ids))
         .all()
     )
-    db_ids = [r.id for r in db_ids]
+    db_ids = [r.fid for r in db_ids]
 
     objs = [to_obj(f, db_ids) for f in data.get("features")]
 
