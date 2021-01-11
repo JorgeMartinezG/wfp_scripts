@@ -2,6 +2,7 @@ import logging
 import requests
 from datetime import datetime
 
+import optparse
 import os
 
 from dotenv import load_dotenv
@@ -105,6 +106,11 @@ def parse(item):
 
 
 def main():
+    parser = optparse.OptionParser()
+    parser.add_option(
+        "-a", "--all", action="store_true", dest="all", default=False
+    )
+    options, _ = parser.parse_args()
     # Database check.
     try:
         engine.execute(CreateSchema(os.getenv("DB_SCHEMA")))
@@ -114,7 +120,13 @@ def main():
     # Create tables.
     Base.metadata.create_all(engine)
 
-    resp = requests.post(os.getenv("API_URL"))
+    url_field = "API_URL"
+    if options.all is True:
+        url_field = "ALL_API_URL"
+
+    file_name = os.getenv(url_field)
+    logging.info(f"Using file name {file_name}")
+    resp = requests.post(file_name)
     if resp.status_code != 200:
         raise ValueError("Could not download data")
 
