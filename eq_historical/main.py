@@ -10,7 +10,7 @@ from sqlalchemy import (
     Integer,
     String,
     Float,
-    DateTime,
+    Date,
 )
 from sqlalchemy.schema import CreateSchema
 from sqlalchemy.ext.declarative import declarative_base
@@ -46,7 +46,7 @@ class Earthquake(Base):
     shape = Column(Geometry(geometry_type="POINT", srid=4326))
     mag = Column(Float)
     place = Column(String)
-    time = Column(DateTime, nullable=False)
+    time = Column(Date, nullable=False)
     url = Column(String)
     tsunami = Column(Integer)
     mmi = Column(Integer)
@@ -85,7 +85,7 @@ def to_obj(feature, db_ids):
 
         value = v
         if k == "time":
-            value = datetime.fromtimestamp(v / 1000.0)  # milliseconds.
+            value = datetime.fromtimestamp(v / 1000.0).date()  # milliseconds.
 
         item[k] = value
 
