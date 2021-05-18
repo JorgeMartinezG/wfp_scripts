@@ -1,0 +1,10 @@
+[GDACS]
+URL = https://www.gdacs.org
+
+[PG]
+HOST = localhost
+USER = mj
+PW = mj
+NAME = wfp_pub
+SCHEMA = gdacs
+PORT = 5432

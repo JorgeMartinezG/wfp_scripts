@@ -1,0 +1,14 @@
+certifi==2020.12.5
+chardet==4.0.0
+GeoAlchemy2==0.8.5
+greenlet==1.1.0
+idna==2.10
+importlib-metadata==4.0.1
+lxml==4.6.3
+psycopg2==2.8.6
+requests==2.25.1
+Shapely==1.7.1
+SQLAlchemy==1.4.15
+typing-extensions==3.10.0.0
+urllib3==1.26.4
+zipp==3.4.1
