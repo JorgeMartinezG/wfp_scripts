@@ -39,6 +39,8 @@ if options.config is None:
 config = ConfigParser()
 config.read(options.config)
 
+GDACS_URL = config.get("GDACS", "URL")
+
 DB_HOST = config.get("PG", "HOST")
 DB_USER = config.get("PG", "USER")
 DB_PW = config.get("PG", "PW")
