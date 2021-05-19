@@ -1,12 +1,9 @@
 import requests
-import pandas as pd
 import csv
 import logging
-import os
 
 from arcgis.gis import GIS
 from datetime import date
-from dotenv import load_dotenv
 from optparse import OptionParser
 
 from configparser import ConfigParser
@@ -65,7 +62,8 @@ def upload_arcgis():
     ARCGIS_URL = config.get("ARCGIS", "URL")
 
     gis = GIS(ARCGIS_URL, ARCGIS_USER, ARCGIS_PW)
-    items = gis.content.search(f"title:{FILENAME} type:CSV owner:{ARCGIS_USER}")
+    content_data = f"title:{FILENAME} type:CSV owner:{ARCGIS_USER}"
+    items = gis.content.search(content_data)
 
     item_params = dict(title=FILENAME)
     overwrite = False
