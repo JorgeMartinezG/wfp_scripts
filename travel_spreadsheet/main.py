@@ -5,6 +5,12 @@ from os.path import join
 from arcgis.features import FeatureLayerCollection
 from arcgis.gis import GIS
 
+from optparse import OptionParser
+
+parser = OptionParser()
+parser.add_option("-c", "--config", dest="config", default="config.txt")
+options, _ = parser.parse_args()
+
 logger = logging.getLogger()
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
 
@@ -59,7 +65,7 @@ def main():
 
 if __name__ == "__main__":
     config = ConfigParser()
-    config.read("./config.txt")
+    config.read(options.config)
 
     FILENAME = config.get("MISC", "FILENAME")
     PATH = config.get("MISC", "PATH")
