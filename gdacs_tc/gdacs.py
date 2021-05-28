@@ -22,6 +22,8 @@ from sqlalchemy.schema import CreateSchema
 from sqlalchemy.exc import ProgrammingError
 from optparse import OptionParser
 
+from dateutil import parser as dateparser
+
 from configparser import ConfigParser
 
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
@@ -143,20 +145,18 @@ def get_geojsons_paths(tc_url):
 
 
 def get_datetime(props):
-    date_time = props.get("fromdate", "")
+    date_time = props.get("todate")
 
-    if date_time not in ["", None]:
-        return datetime.strptime(date_time, "%d/%b/%Y %H:%M:%S")
+    if date_time is None:
+        date_time = props.get("jrc_pubdate")
 
-    date_time = props.get("jrc_pubdate")
-    if date_time not in ["", None]:
-        return datetime.strptime(date_time, "%d/%b/%Y %H:%M:%S")
+    if date_time is None:
+        date_time = props.get("fromdate")
 
-    date_time = props.get("trackdate")
-    if date_time not in ["", None]:
-        return datetime.strptime(date_time, "%d/%m/%Y %H:%M:%S")
+    if date_time is None:
+        date_time = props.get("trackdate")
 
-    return None
+    return dateparser.parse(date_time)
 
 
 def get_points(features):
@@ -376,6 +376,7 @@ def process_rss_event(event):
         return
 
     event_url = f"{GDACS_URL}/datareport/resources/TC/{event_id}/geojson_{event_id}_{episode_id}.geojson"
+    print(event_url)
 
     resp = requests.get(event_url).json()
 
