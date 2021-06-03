@@ -76,6 +76,7 @@ class Node(Base):
     event_name = Column(String)
     wind_speed = Column(Float, nullable=False)
     timestamp = Column(DateTime, nullable=False)
+    released_date = Column(DateTime)
     shape = Column(Geometry("POINT", 4326))
 
 
@@ -185,14 +186,14 @@ def get_nodes_and_fields(json_features):
         fields_copy = fields.copy()
 
         try:
-            timestamp = get_datetime(props)
+            released_date = get_datetime(props)
         except:
-            timestamp = fields.get("timestamp")
+            released_date = fields.get("timestamp")
 
         fields_copy.update(
             {
                 "shape": f"SRID=4326; {geom}",
-                "timestamp": timestamp,
+                "released_date": released_date,
                 "wind_speed": float(props.get("windspeed", 0.0)),
             }
         )
