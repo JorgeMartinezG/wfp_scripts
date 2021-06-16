@@ -1,0 +1,14 @@
+[ACLED]
+KEY=""
+EMAIL=""
+API_URL=""
+ISO_COUNTRIES="508"
+
+[ARCGIS]
+USER=""
+PW=""
+URL=""
+
+[MISC]
+START_DATE=""
+FILENAME="test"
