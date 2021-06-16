@@ -22,6 +22,8 @@ from sqlalchemy.schema import CreateSchema
 from sqlalchemy.exc import ProgrammingError
 from optparse import OptionParser
 
+from dateutil import parser as dateparser
+
 from configparser import ConfigParser
 
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
@@ -74,6 +76,7 @@ class Node(Base):
     event_name = Column(String)
     wind_speed = Column(Float, nullable=False)
     timestamp = Column(DateTime, nullable=False)
+    released_date = Column(DateTime)
     shape = Column(Geometry("POINT", 4326))
 
 
@@ -143,20 +146,18 @@ def get_geojsons_paths(tc_url):
 
 
 def get_datetime(props):
-    date_time = props.get("fromdate", "")
+    date_time = props.get("todate")
 
-    if date_time not in ["", None]:
-        return datetime.strptime(date_time, "%d/%b/%Y %H:%M:%S")
+    if date_time is None:
+        date_time = props.get("jrc_pubdate")
 
-    date_time = props.get("jrc_pubdate")
-    if date_time not in ["", None]:
-        return datetime.strptime(date_time, "%d/%b/%Y %H:%M:%S")
+    if date_time is None:
+        date_time = props.get("fromdate")
 
-    date_time = props.get("trackdate")
-    if date_time not in ["", None]:
-        return datetime.strptime(date_time, "%d/%m/%Y %H:%M:%S")
+    if date_time is None:
+        date_time = props.get("trackdate")
 
-    return None
+    return dateparser.parse(date_time)
 
 
 def get_points(features):
@@ -185,14 +186,14 @@ def get_nodes_and_fields(json_features):
         fields_copy = fields.copy()
 
         try:
-            timestamp = get_datetime(props)
+            released_date = get_datetime(props)
         except:
-            timestamp = fields.get("timestamp")
+            released_date = fields.get("timestamp")
 
         fields_copy.update(
             {
                 "shape": f"SRID=4326; {geom}",
-                "timestamp": timestamp,
+                "released_date": released_date,
                 "wind_speed": float(props.get("windspeed", 0.0)),
             }
         )
@@ -376,6 +377,7 @@ def process_rss_event(event):
         return
 
     event_url = f"{GDACS_URL}/datareport/resources/TC/{event_id}/geojson_{event_id}_{episode_id}.geojson"
+    print(event_url)
 
     resp = requests.get(event_url).json()
 
