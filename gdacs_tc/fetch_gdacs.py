@@ -41,6 +41,8 @@ def list_ordered_geojsons(path):
         if link.attrib.get("href").endswith(".geojson")
     ]
 
+    links = [l for l in links if len(l.split("_")) == 3]
+
     links.sort(
         key=lambda f: int(basename(f).split("_")[-1].split(".")[0]),
         reverse=True,
@@ -63,6 +65,7 @@ def filter_features(features, geometry_type):
 
 
 def process_event(event_path):
+    print(f"Processing event {event_path}")
     geojsons_paths = list_ordered_geojsons(event_path)
 
     paths_iter = iter(geojsons_paths)
@@ -85,6 +88,7 @@ def process_event(event_path):
             )
             if point is None:
                 continue
+            point["path"] = path
             geometries.get("point").append(point)
 
     points_dict = []
@@ -96,7 +100,11 @@ def process_event(event_path):
         datetime_keys = [k for k in props.keys() if "date" in k]
         datetime_keys.sort(reverse=True)
 
-        datetime_value = dateparser.parse(props.get(datetime_keys[0]))
+        try:
+            datetime_value = dateparser.parse(props.get(datetime_keys[0]))
+        except:
+            print("FAILLLLLL:", point, event_path)
+            continue
 
         fields = {
             "timestamp": datetime_value,
@@ -108,7 +116,10 @@ def process_event(event_path):
 
         points_dict.append(fields)
 
-    points_dict.sort(key=lambda x: x.get("timestamp"))
+    if len(points_dict) == 0:
+        return
+
+    points_dict.sort(key=lambda x: x.get("timestamp"), reverse=True)
 
     # Update points.
     fields = {
@@ -120,10 +131,15 @@ def process_event(event_path):
         {**fields, "released_date": p.get("timestamp")} for p in points_dict
     ]
 
-    return processed_points
+    #print([d.get("released_date").isoformat() for d in processed_points])
+    #return processed_points
 
 
 event_type = EventType("TC")
 events_paths = list_events_paths(event_type.name)
-data = process_event(events_paths[1000])
-print([d.get("timestamp") for d in data])
+
+from multiprocessing import Pool
+
+with Pool() as p:
+    p.map(process_event, events_paths)
+
