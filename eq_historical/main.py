@@ -3,7 +3,6 @@ import requests
 import optparse
 import os
 
-from dotenv import load_dotenv
 from sqlalchemy import (
     create_engine,
     Column,
@@ -21,66 +20,122 @@ from sqlalchemy.exc import ProgrammingError
 
 from datetime import date, datetime, timedelta
 
+from configparser import ConfigParser
+
+from io import BytesIO
+from zipfile import ZipFile
+
+import shapefile
+
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
 
-load_dotenv("config.env")
+parser = optparse.OptionParser()
+parser.add_option(
+    "-r", "--rss", action="store_true", dest="rss", default=False
+)
+parser.add_option("-c", "--config", dest="config", default="config.txt")
+options, _ = parser.parse_args()
 
-API_URL = os.getenv("API_URL")
-DB_URL = os.getenv("DB_URL")
-DB_SCHEMA = os.getenv("DB_SCHEMA")
+config = ConfigParser()
+config.read(options.config)
 
-engine = create_engine(DB_URL)
-Session = sessionmaker(bind=engine)
-session = Session()
+DB_SCHEMA = config.get("DB", "SCHEMA")
 
 DATE_RUN = date.today()
 
 Base = declarative_base()
 
+TABLE_COLUMNS = ["mag", "place", "time", "mmi", "title"]
+
+engine = create_engine(config.get("DB", "URL"))
+Session = sessionmaker(bind=engine)
+
 
 class Earthquake(Base):
-    __tablename__ = "wld_eq_historical"
+    __tablename__ = config.get("DB", "EVENTS_TABLE_NAME")
     __table_args__ = {"schema": DB_SCHEMA}
 
-    fid = Column(String, primary_key=True)
+    id = Column(String, primary_key=True)
     shape = Column(Geometry(geometry_type="POINT", srid=4326))
     mag = Column(Float)
     place = Column(String)
     time = Column(Date, nullable=False)
-    url = Column(String)
-    tsunami = Column(Integer)
     mmi = Column(Integer)
-    sig = Column(Integer)
     title = Column(String, nullable=False)
-    ids = Column(String)
-    sources = Column(String)
 
 
-def to_obj(feature, db_ids):
+class ShakeMap(Base):
+    __tablename__ = config.get("DB", "SM_TABLE_NAME")
+    __table_args__ = {"schema": DB_SCHEMA}
+
+    id = Column(Integer, primary_key=True)
+    shape = Column(Geometry(geometry_type="POLYGON", srid=4326))
+    mmi = Column(Integer, nullable=False)
+    eq_id = Column(String, nullable=False)
+
+
+def download_shakemap_polygons(id, detail_url):
+    resp = requests.get(detail_url)
+    resp.raise_for_status()
+
+    zip_url = (
+        resp.json()
+        .get("properties")
+        .get("products")
+        .get("shakemap")[0]
+        .get("contents")
+        .get("download/shape.zip")
+        .get("url")
+    )
+
+    resp = requests.get(zip_url)
+    resp.raise_for_status()
+
+    zip_shape = ZipFile(BytesIO(resp.content))
+    shape = shapefile.Reader(
+        shp=zip_shape.open("mi.shp"),
+        dbf=zip_shape.open("mi.dbf"),
+        shx=zip_shape.open("mi.shx"),
+    )
+
+    sql_objects = []
+    for sr in shape.shapeRecords():
+        mmi = sr.record.PARAMVALUE
+
+        # Better fix.
+        points = sr.shape.points
+        if points[0] != points[-1]:
+            points.append(points[0])
+
+        points = ",".join([f"{x} {y}" for x, y in points])
+
+        shape = f"SRID=4326;POLYGON(({points}))"
+
+        sql_objects.append(ShakeMap(eq_id=id, mmi=mmi, shape=shape))
+
+    session = Session()
+    session.add_all(sql_objects)
+    session.commit()
+
+
+def parse_feature(feature, db_ids):
     obj_id = feature.get("id")
 
     if obj_id in db_ids:
         logging.info(f"Skipping object {obj_id}")
         return None
 
-    fields = [
-        "mag",
-        "place",
-        "time",
-        "url",
-        "tsunami",
-        "mmi",
-        "sig",
-        "title",
-        "ids",
-        "sources",
-    ]
+    properties = feature.get("properties")
+    item = {"id": obj_id}
 
-    item = {"fid": obj_id}
+    if "shakemap" in properties.get("types"):
+        logging.info(f"Collect shakemap data for id: {obj_id}")
+        detail_url = properties.get("detail")
+        shake_map = download_shakemap_polygons(obj_id, detail_url)
 
     # Parse parameters.
-    for k, v in feature.get("properties").items():
-        if k not in fields:
+    for k, v in properties.items():
+        if k not in TABLE_COLUMNS:
             continue
 
         value = v
@@ -88,6 +143,7 @@ def to_obj(feature, db_ids):
             value = datetime.fromtimestamp(v / 1000.0).date()  # milliseconds.
 
         item[k] = value
+
 
     # Create geom.
     geom = feature.get("geometry")
@@ -115,23 +171,26 @@ def request_api(start_date, end_date):
         format="geojson",
     )
 
-    resp = requests.get(API_URL, params=params)
+    resp = requests.get(config.get("USGS", "API_URL"), params=params)
     if resp.status_code != 200:
         raise ValueError("could not fetch data from server.")
 
     data = resp.json()
+    features = data.get("features")
 
-    response_ids = [r.get("id") for r in data.get("features")]
+    response_ids = [r.get("id") for r in features]
+
+    session = Session()
 
     # Get all ids which are in the database already.
     db_ids = (
-        session.query(Earthquake.fid)
-        .filter(Earthquake.fid.in_(response_ids))
+        session.query(Earthquake.id)
+        .filter(Earthquake.id.in_(response_ids))
         .all()
     )
-    db_ids = [r.fid for r in db_ids]
+    db_ids = [r.id for r in db_ids]
 
-    objs = [to_obj(f, db_ids) for f in data.get("features")]
+    objs = [parse_feature(f, db_ids) for f in features]
 
     session.add_all([o for o in objs if o is not None])
     session.commit()
@@ -139,14 +198,11 @@ def request_api(start_date, end_date):
 
 def fetch_all():
     step = 5  # years
-
-    start_date = date(1900, 1, 1)
+    start_date = date(2010, 1, 1)
     while start_date < DATE_RUN:
         end_date = min(start_date + timedelta(days=365 * step), DATE_RUN)
-
         request_api(start_date, end_date)
-
-        start_date = end_date + timedelta(days=1)
+        start_date = end_date
 
 
 def fetch_most_recent():
@@ -156,12 +212,6 @@ def fetch_most_recent():
 
 
 def main():
-    parser = optparse.OptionParser()
-    parser.add_option(
-        "-w", "--weekly", action="store_true", dest="weekly", default=False
-    )
-    options, _ = parser.parse_args()
-
     # Database check.
     try:
         engine.execute(CreateSchema(DB_SCHEMA))
@@ -171,10 +221,7 @@ def main():
     # Create tables.
     Base.metadata.create_all(engine)
 
-    if options.weekly is False:
-        fetch_all()
-    else:
-        fetch_most_recent()
+    fetch_all()
 
 
 if __name__ == "__main__":
