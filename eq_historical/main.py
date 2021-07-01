@@ -9,7 +9,7 @@ from sqlalchemy import (
     Integer,
     String,
     Float,
-    Date,
+    DateTime,
 )
 from sqlalchemy.schema import CreateSchema
 from sqlalchemy.ext.declarative import declarative_base
@@ -59,7 +59,7 @@ class Earthquake(Base):
     shape = Column(Geometry(geometry_type="POINT", srid=4326))
     mag = Column(Float)
     place = Column(String)
-    time = Column(Date, nullable=False)
+    time = Column(DateTime, nullable=False)
     mmi = Column(Integer)
     title = Column(String, nullable=False)
 
@@ -72,9 +72,10 @@ class ShakeMap(Base):
     shape = Column(Geometry(geometry_type="POLYGON", srid=4326))
     mmi = Column(Integer, nullable=False)
     eq_id = Column(String, nullable=False)
+    time = Column(DateTime, nullable=False)
 
 
-def download_shakemap_polygons(id, detail_url):
+def download_shakemap_polygons(detail_url, item):
     resp = requests.get(detail_url)
     resp.raise_for_status()
 
@@ -101,6 +102,8 @@ def download_shakemap_polygons(id, detail_url):
     sql_objects = []
     for sr in shape.shapeRecords():
         mmi = sr.record.PARAMVALUE
+        if mmi >= 6:
+            continue
 
         # Better fix.
         points = sr.shape.points
@@ -111,7 +114,14 @@ def download_shakemap_polygons(id, detail_url):
 
         shape = f"SRID=4326;POLYGON(({points}))"
 
-        sql_objects.append(ShakeMap(eq_id=id, mmi=mmi, shape=shape))
+        sql_objects.append(
+            ShakeMap(
+                eq_id=item.get("id"),
+                mmi=mmi,
+                shape=shape,
+                time=item.get("time"),
+            )
+        )
 
     session = Session()
     session.add_all(sql_objects)
@@ -126,14 +136,9 @@ def parse_feature(feature, db_ids):
         return None
 
     properties = feature.get("properties")
-    item = {"id": obj_id}
-
-    if "shakemap" in properties.get("types"):
-        logging.info(f"Collect shakemap data for id: {obj_id}")
-        detail_url = properties.get("detail")
-        shake_map = download_shakemap_polygons(obj_id, detail_url)
 
     # Parse parameters.
+    item = {"id": obj_id}
     for k, v in properties.items():
         if k not in TABLE_COLUMNS:
             continue
@@ -144,7 +149,6 @@ def parse_feature(feature, db_ids):
 
         item[k] = value
 
-
     # Create geom.
     geom = feature.get("geometry")
 
@@ -154,6 +158,11 @@ def parse_feature(feature, db_ids):
     item["shape"] = f"SRID=4326;{feat_type} ({coords})"
 
     obj = Earthquake(**item)
+
+    if "shakemap" in properties.get("types"):
+        logging.info(f"Collect shakemap data for id: {obj_id}")
+        detail_url = properties.get("detail")
+        download_shakemap_polygons(detail_url, item)
 
     return obj
 
