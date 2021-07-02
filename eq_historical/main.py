@@ -25,7 +25,7 @@ from configparser import ConfigParser
 from io import BytesIO
 from zipfile import ZipFile
 
-import shapefile
+from osgeo import ogr
 
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
 
@@ -70,7 +70,7 @@ class ShakeMap(Base):
 
     id = Column(Integer, primary_key=True)
     shape = Column(Geometry(geometry_type="POLYGON", srid=4326))
-    mmi = Column(Integer, nullable=False)
+    mmi = Column(Float, nullable=False)
     eq_id = Column(String, nullable=False)
     time = Column(DateTime, nullable=False)
 
@@ -89,6 +89,38 @@ def download_shakemap_polygons(detail_url, item):
         .get("url")
     )
 
+    FILE_PATH = "/tmp/test.zip"
+
+    with requests.get(zip_url, stream=True) as r:
+        r.raise_for_status()
+        with open(FILE_PATH, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=8192): 
+                f.write(chunk)
+
+    with ZipFile(FILE_PATH, "r") as z:
+        z.extractall("/tmp/")
+
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    shp = driver.Open("/tmp/mi.shp")
+    layer = shp.GetLayer()
+
+
+    sql_objects = []
+    for i in range(layer.GetFeatureCount()):  
+        feature = layer.GetFeature(i)  
+        wkt = feature.GetGeometryRef().ExportToWkt()  
+        shape = f"SRID=4326;{wkt}"
+
+        sql_objects.append(
+            ShakeMap(
+                eq_id=item.get("id"),
+                mmi=feature.GetField('PARAMVALUE'),
+                shape=shape,
+                time=item.get("time"),
+            )
+        )
+
+    '''
     resp = requests.get(zip_url)
     resp.raise_for_status()
 
@@ -99,7 +131,6 @@ def download_shakemap_polygons(detail_url, item):
         shx=zip_shape.open("mi.shx"),
     )
 
-    sql_objects = []
     for sr in shape.shapeRecords():
         mmi = sr.record.PARAMVALUE
         if mmi >= 6:
@@ -122,6 +153,7 @@ def download_shakemap_polygons(detail_url, item):
                 time=item.get("time"),
             )
         )
+    '''
 
     session = Session()
     session.add_all(sql_objects)
