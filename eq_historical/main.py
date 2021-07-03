@@ -1,7 +1,6 @@
 import logging
 import requests
 import optparse
-import os
 
 from sqlalchemy import (
     create_engine,
@@ -22,10 +21,13 @@ from datetime import date, datetime, timedelta
 
 from configparser import ConfigParser
 
-from io import BytesIO
 from zipfile import ZipFile
 
 from osgeo import ogr
+
+from os.path import join
+
+from tempfile import TemporaryDirectory
 
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
 
@@ -89,61 +91,34 @@ def download_shakemap_polygons(detail_url, item):
         .get("url")
     )
 
-    FILE_PATH = "/tmp/test.zip"
+    temp_folder = TemporaryDirectory()
+
+    FILE_PATH = join(temp_folder.name, "{}.zip".format(item.get("id")))
 
     with requests.get(zip_url, stream=True) as r:
         r.raise_for_status()
-        with open(FILE_PATH, 'wb') as f:
-            for chunk in r.iter_content(chunk_size=8192): 
+        with open(FILE_PATH, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
 
-    with ZipFile(FILE_PATH, "r") as z:
-        z.extractall("/tmp/")
+    with ZipFile(FILE_PATH, "r") as zip_file:
+        zip_file.extractall(temp_folder.name)
 
-    driver = ogr.GetDriverByName('ESRI Shapefile')
-    shp = driver.Open("/tmp/mi.shp")
+
+    driver = ogr.GetDriverByName("ESRI Shapefile")
+    shp = driver.Open(join(temp_folder.name, "mi.shp"))
     layer = shp.GetLayer()
 
-
     sql_objects = []
-    for i in range(layer.GetFeatureCount()):  
-        feature = layer.GetFeature(i)  
-        wkt = feature.GetGeometryRef().ExportToWkt()  
-        shape = f"SRID=4326;{wkt}"
+    for i in range(layer.GetFeatureCount()):
+        feature = layer.GetFeature(i)
 
-        sql_objects.append(
-            ShakeMap(
-                eq_id=item.get("id"),
-                mmi=feature.GetField('PARAMVALUE'),
-                shape=shape,
-                time=item.get("time"),
-            )
-        )
-
-    '''
-    resp = requests.get(zip_url)
-    resp.raise_for_status()
-
-    zip_shape = ZipFile(BytesIO(resp.content))
-    shape = shapefile.Reader(
-        shp=zip_shape.open("mi.shp"),
-        dbf=zip_shape.open("mi.dbf"),
-        shx=zip_shape.open("mi.shx"),
-    )
-
-    for sr in shape.shapeRecords():
-        mmi = sr.record.PARAMVALUE
-        if mmi >= 6:
+        mmi = feature.GetField("PARAMVALUE")
+        if mmi < 6:
             continue
 
-        # Better fix.
-        points = sr.shape.points
-        if points[0] != points[-1]:
-            points.append(points[0])
-
-        points = ",".join([f"{x} {y}" for x, y in points])
-
-        shape = f"SRID=4326;POLYGON(({points}))"
+        wkt = feature.GetGeometryRef().ExportToWkt()
+        shape = f"SRID=4326;{wkt}"
 
         sql_objects.append(
             ShakeMap(
@@ -153,11 +128,12 @@ def download_shakemap_polygons(detail_url, item):
                 time=item.get("time"),
             )
         )
-    '''
 
     session = Session()
     session.add_all(sql_objects)
     session.commit()
+
+    temp_folder.cleanup()
 
 
 def parse_feature(feature, db_ids):
