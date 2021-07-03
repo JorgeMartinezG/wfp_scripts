@@ -190,7 +190,7 @@ def request_api(start_date, end_date):
     params = dict(
         starttime=start_time,
         endtime=end_time,
-        minmagnitude=7,
+        minmagnitude=4,
         format="geojson",
     )
 
