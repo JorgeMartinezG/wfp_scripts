@@ -47,10 +47,12 @@ DATE_RUN = date.today()
 
 Base = declarative_base()
 
-TABLE_COLUMNS = ["mag", "place", "time", "mmi", "title"]
+TABLE_COLUMNS = ["mag", "place", "time", "mmi", "title", "id"]
 
 engine = create_engine(config.get("DB", "URL"))
 Session = sessionmaker(bind=engine)
+
+from multiprocessing import Pool
 
 
 class Earthquake(Base):
@@ -143,17 +145,11 @@ def download_shakemap_polygons(detail_url, item):
     temp_folder.cleanup()
 
 
-def parse_feature(feature, db_ids):
-    obj_id = feature.get("id")
-
-    if obj_id in db_ids:
-        logging.info(f"Skipping object {obj_id}")
-        return None
-
+def parse_feature(feature):
     properties = feature.get("properties")
 
     # Parse parameters.
-    item = {"id": obj_id}
+    item = {"id": feature.get("id")}
     for k, v in properties.items():
         if k not in TABLE_COLUMNS:
             continue
@@ -175,7 +171,7 @@ def parse_feature(feature, db_ids):
     obj = Earthquake(**item)
 
     if "shakemap" in properties.get("types"):
-        logging.info(f"Collect shakemap data for id: {obj_id}")
+        logging.info("Collect shakemap data for id: {}".format(item.get("id")))
         detail_url = properties.get("detail")
         download_shakemap_polygons(detail_url, item)
 
@@ -206,18 +202,13 @@ def request_api(start_date, end_date):
 
     session = Session()
 
-    # Get all ids which are in the database already.
-    db_ids = (
-        session.query(Earthquake.id)
-        .filter(Earthquake.id.in_(response_ids))
-        .all()
-    )
-    db_ids = [r.id for r in db_ids]
+    with Pool() as p:
+        p.map(parse_feature, features)
 
-    objs = [parse_feature(f, db_ids) for f in features]
-
+    '''
     session.add_all([o for o in objs if o is not None])
     session.commit()
+    '''
 
 
 def fetch_all():
