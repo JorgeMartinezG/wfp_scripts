@@ -114,7 +114,10 @@ def download_shakemap_polygons(detail_url, item):
     for i in range(layer.GetFeatureCount()):
         feature = layer.GetFeature(i)
 
-        mmi = feature.GetField("PARAMVALUE")
+        try:
+            mmi = feature.GetField("PARAMVALUE")
+        except:
+            mmi = feature.GetField("VALUE")
 
         geom = feature.GetGeometryRef()
         geom_name = geom.GetGeometryName()
@@ -187,7 +190,7 @@ def request_api(start_date, end_date):
     params = dict(
         starttime=start_time,
         endtime=end_time,
-        minmagnitude=5,
+        minmagnitude=7,
         format="geojson",
     )
 
