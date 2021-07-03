@@ -104,7 +104,6 @@ def download_shakemap_polygons(detail_url, item):
     with ZipFile(FILE_PATH, "r") as zip_file:
         zip_file.extractall(temp_folder.name)
 
-
     driver = ogr.GetDriverByName("ESRI Shapefile")
     shp = driver.Open(join(temp_folder.name, "mi.shp"))
     layer = shp.GetLayer()
@@ -114,20 +113,28 @@ def download_shakemap_polygons(detail_url, item):
         feature = layer.GetFeature(i)
 
         mmi = feature.GetField("PARAMVALUE")
-        if mmi < 6:
+
+        geom = feature.GetGeometryRef()
+        geom_name = geom.GetGeometryName()
+
+        if geom_name not in ("MULTIPOLYGON", "POLYGON"):
+            logging.warn(
+                f"Earthquake {item.get('id')} contains geometry not supported: {geom_name}"
+            )
             continue
 
-        wkt = feature.GetGeometryRef().ExportToWkt()
-        shape = f"SRID=4326;{wkt}"
+        # Split multipolygon into array of polygons.
+        geom_array = [geom] if geom_name == "POLYGON" else [g for g in geom]
 
-        sql_objects.append(
-            ShakeMap(
-                eq_id=item.get("id"),
-                mmi=mmi,
-                shape=shape,
-                time=item.get("time"),
+        for geom in geom_array:
+            sql_objects.append(
+                ShakeMap(
+                    eq_id=item.get("id"),
+                    mmi=mmi,
+                    shape=f"SRID=4326;{geom.ExportToWkt()}",
+                    time=item.get("time"),
+                )
             )
-        )
 
     session = Session()
     session.add_all(sql_objects)
