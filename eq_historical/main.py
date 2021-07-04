@@ -29,6 +29,12 @@ from os.path import join
 
 from tempfile import TemporaryDirectory
 
+from csv import DictReader
+
+from json import dumps
+
+from multiprocessing import Pool
+
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
 
 parser = optparse.OptionParser()
@@ -43,16 +49,12 @@ config.read(options.config)
 
 DB_SCHEMA = config.get("DB", "SCHEMA")
 
-DATE_RUN = date.today()
-
 Base = declarative_base()
 
 TABLE_COLUMNS = ["mag", "place", "time", "mmi", "title", "id"]
 
 engine = create_engine(config.get("DB", "URL"))
 Session = sessionmaker(bind=engine)
-
-from multiprocessing import Pool
 
 
 class Earthquake(Base):
@@ -66,6 +68,7 @@ class Earthquake(Base):
     time = Column(DateTime, nullable=False)
     mmi = Column(Integer)
     title = Column(String, nullable=False)
+    iso3 = Column(String, nullable=False)
 
 
 class ShakeMap(Base):
@@ -77,6 +80,7 @@ class ShakeMap(Base):
     mmi = Column(Float, nullable=False)
     eq_id = Column(String, nullable=False)
     time = Column(DateTime, nullable=False)
+    iso3 = Column(String, nullable=False)
 
 
 def download_shakemap_polygons(detail_url, item):
@@ -116,7 +120,7 @@ def download_shakemap_polygons(detail_url, item):
 
         try:
             mmi = feature.GetField("PARAMVALUE")
-        except:
+        except ValueError:
             mmi = feature.GetField("VALUE")
 
         geom = feature.GetGeometryRef()
@@ -124,13 +128,12 @@ def download_shakemap_polygons(detail_url, item):
 
         if geom_name not in ("MULTIPOLYGON", "POLYGON"):
             logging.warn(
-                f"Earthquake {item.get('id')} contains geometry not supported: {geom_name}"
+                f"Geometry not supported: {geom_name}"
             )
             continue
 
         # Split multipolygon into array of polygons.
         geom_array = [geom] if geom_name == "POLYGON" else [g for g in geom]
-
         for geom in geom_array:
             sql_objects.append(
                 ShakeMap(
@@ -138,6 +141,7 @@ def download_shakemap_polygons(detail_url, item):
                     mmi=mmi,
                     shape=f"SRID=4326;{geom.ExportToWkt()}",
                     time=item.get("time"),
+                    iso3=item.get("iso3")
                 )
             )
 
@@ -148,11 +152,11 @@ def download_shakemap_polygons(detail_url, item):
     temp_folder.cleanup()
 
 
-def parse_feature(feature):
+def parse_feature(feature, iso3):
     properties = feature.get("properties")
 
     # Parse parameters.
-    item = {"id": feature.get("id")}
+    item = {"id": feature.get("id"), "iso3": iso3}
     for k, v in properties.items():
         if k not in TABLE_COLUMNS:
             continue
@@ -181,52 +185,67 @@ def parse_feature(feature):
     return obj
 
 
-def request_api(start_date, end_date):
-    start_time = start_date.isoformat()
-    end_time = end_date.isoformat()
+def fetch_country(country_dict):
+    # Create bounding box from country polygon.
+    minlon, maxlon, minlat, maxlat = country_dict.get("geom").GetEnvelope()
 
-    logging.info(f"Fetching earthquakes: {start_time} - {end_time}")
+    starttime = date(2010, 1, 1)
+    endtime = date.today() + timedelta(days=1)
 
     params = dict(
-        starttime=start_time,
-        endtime=end_time,
-        minmagnitude=4,
         format="geojson",
+        starttime=starttime,
+        endtime=endtime,
+        minlongitude=minlon,
+        maxlongitude=maxlon,
+        minlatitude=minlat,
+        maxlatitude=maxlat,
     )
 
     resp = requests.get(config.get("USGS", "API_URL"), params=params)
     if resp.status_code != 200:
         raise ValueError("could not fetch data from server.")
 
-    data = resp.json()
-    features = data.get("features")
+    features = resp.json().get("features")
 
-    response_ids = [r.get("id") for r in features]
+    logging.info(f"Found {len(features)} features")
+
+    sql_objs = [parse_feature(f, country_dict.get("iso3")) for f in features]
 
     session = Session()
-
-    with Pool() as p:
-        p.map(parse_feature, features)
-
-    '''
-    session.add_all([o for o in objs if o is not None])
+    session.add_all(sql_objs)
     session.commit()
-    '''
 
 
-def fetch_all():
-    step = 5  # years
-    start_date = date(2010, 1, 1)
-    while start_date < DATE_RUN:
-        end_date = min(start_date + timedelta(days=365 * step), DATE_RUN)
-        request_api(start_date, end_date)
-        start_date = end_date
+def fetch_rss(countries):
+    logging.info("Fetching data from rss feed")
 
+    resp = requests.get(config.get("USGS", "FEED_URL"))
 
-def fetch_most_recent():
-    logging.info("Fetching last two weeks report")
-    start_date = DATE_RUN - timedelta(days=15)
-    request_api(start_date, DATE_RUN)
+    features = resp.json().get("features")
+
+    features = [
+        {**f, "geom": ogr.CreateGeometryFromJson(dumps(f.get("geometry")))}
+        for f in features
+    ]
+
+    session = Session()
+    # Find points that belong to the country.
+    for country in countries:
+        filtered = [
+            f for f in features if country.get("geom").Contains(f.get("geom"))
+        ]
+        if len(filtered) == 0:
+            continue
+
+        # Check that it is within the database.
+        ids = [f.get("id") for f in filtered]
+
+        session.query(ShakeMap).filter(ShakeMap.eq_id.in_(ids)).delete()
+        session.query(Earthquake).filter(Earthquake.id.in_(ids)).delete()
+
+        for feature in filtered:
+            parse_feature(feature, country.get("iso3"))
 
 
 def main():
@@ -239,7 +258,19 @@ def main():
     # Create tables.
     Base.metadata.create_all(engine)
 
-    fetch_all()
+    # List all countries.
+    with open(config.get("USGS", "COUNTRIES_FILE"), "r") as file:
+        countries = [
+            {**x, "geom": ogr.CreateGeometryFromWkt(x.get("bbox"))}
+            for x in DictReader(file)
+        ]
+
+    if options.rss is True:
+        fetch_rss(countries)
+        return
+
+    for country_dict in countries:
+        fetch_country(country_dict)
 
 
 if __name__ == "__main__":

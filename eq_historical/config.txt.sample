@@ -1,0 +1,11 @@
+[USGS]
+API_URL=https://earthquake.usgs.gov/fdsnws/event/1/query
+FEED_URL=https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson
+COUNTRIES_FILE=countries.csv
+
+
+[DB]
+SCHEMA=public
+URL=postgresql://up:up@localhost:5432/postgres
+EVENTS_TABLE_NAME=eq_events
+SM_TABLE_NAME=eq_shakemaps
