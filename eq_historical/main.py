@@ -56,7 +56,7 @@ TABLE_COLUMNS = ["mag", "place", "time", "mmi", "title", "id"]
 engine = create_engine(config.get("DB", "URL"))
 Session = sessionmaker(bind=engine)
 
-
+'''
 class Earthquake(Base):
     __tablename__ = config.get("DB", "EVENTS_TABLE_NAME")
     __table_args__ = {"schema": DB_SCHEMA}
@@ -69,6 +69,7 @@ class Earthquake(Base):
     mmi = Column(Integer)
     title = Column(String, nullable=False)
     iso3 = Column(String, nullable=False)
+'''
 
 
 class ShakeMap(Base):
@@ -242,7 +243,6 @@ def fetch_rss(countries):
         ids = [f.get("id") for f in filtered]
 
         session.query(ShakeMap).filter(ShakeMap.eq_id.in_(ids)).delete()
-        session.query(Earthquake).filter(Earthquake.id.in_(ids)).delete()
 
         for feature in filtered:
             parse_feature(feature, country.get("iso3"))
